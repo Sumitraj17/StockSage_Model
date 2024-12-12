@@ -34,7 +34,8 @@ def process_sales_data(input_file, output_file):
         store = record['store']
         product_name = record['product_name']
         unit_sold = record['unitSold']
-        date = record['date']
+        month = record['month']
+        location = record['location']
 
         # Aggregate total predicted units for each product
         aggregated_data[product_id]['productName'] = product_name
@@ -46,7 +47,8 @@ def process_sales_data(input_file, output_file):
             aggregated_data[product_id]['highest_unit_sold'] = unit_sold
 
         # Add month (extracted from the date field)
-        aggregated_data[product_id]['month'] = datetime.strptime(date, '%Y-%m-%d').strftime('%B')
+        aggregated_data[product_id]['month'] = month
+        aggregated_data[product_id]['location'] = location
 
     # Prepare the final output format
     result = []
@@ -66,35 +68,181 @@ def process_sales_data(input_file, output_file):
     print(f"Processed data saved to {output_file}")
     return result  # Return the final result
 
+
+
+import pandas as pd
+import pickle
+import numpy as np
+from pandas.tseries.offsets import MonthBegin
+from datetime import datetime
+
+# def predict_sales(csv_file, model_path, output_file="predictions_stock.json"):
+#     """
+#     Predict sales for the next month, aggregate predictions by store and product, apply constraints,
+#     and process the data.
+#     """
+#     # Load the trained model
+#     with open(model_path, "rb") as file:
+#         model = pickle.load(file)
+#
+#     # Read the uploaded CSV file into a DataFrame
+#     df = pd.read_csv(csv_file)
+#
+#     # Clean the date column (strip spaces and remove non-ASCII characters)
+#     df['date'] = df['date'].str.strip()  # Removes leading/trailing spaces
+#     df['date'] = df['date'].apply(lambda x: x.encode('ascii', 'ignore').decode('ascii'))  # Removes non-ASCII characters
+#
+#     # Parse the date column (YYYY-MM-DD format)
+#     df['date'] = pd.to_datetime(df['date'], errors='coerce')
+#
+#     # Identify invalid dates (NaT)
+#     invalid_dates = df[df['date'].isna()]
+#     if not invalid_dates.empty:
+#         print("Invalid dates found in the input file:")
+#         print(invalid_dates)
+#         # Handle invalid dates - one approach is to fill them with the previous valid date or current date
+#         # Option 1: Replace NaT with the previous valid date (if it exists)
+#         df['date'] = df['date'].fillna(method='ffill')  # Forward fill
+#         print("Invalid dates corrected.")
+#
+#     # Map product IDs to integers dynamically
+#     item_mapping = {item: idx + 1 for idx, item in enumerate(df['item'].unique())}
+#     df['item'] = df['item'].map(item_mapping)
+#
+#     # Create a store-location mapping (ensure each store has a unique location)
+#     store_location_mapping = df[['store', 'location']].drop_duplicates().set_index('store')['location'].to_dict()
+#
+#     # Dynamically determine the last date in the dataset
+#     last_date = df['date'].max()
+#
+#     # Generate the future dates for prediction
+#     next_month_start = (last_date + MonthBegin(1))
+#     next_month_days = pd.date_range(next_month_start, periods=31, freq='D')
+#
+#     # Dynamically extract unique stores and items
+#     stores = df['store'].unique()
+#     items = df['item'].unique()
+#
+#     # Create all combinations of future dates, stores, and items
+#     future_df = pd.DataFrame(
+#         [(date, store, item) for date in next_month_days for store in stores for item in items],
+#         columns=['date', 'store', 'item']
+#     )
+#
+#     # Merge product details dynamically
+#     if 'product_name' in df.columns:
+#         future_df = future_df.merge(df[['item', 'product_name']].drop_duplicates(), on='item', how='left')
+#
+#     # Map the 'location' for each store in future_df
+#     future_df['location'] = future_df['store'].map(store_location_mapping)
+#
+#     # If a store's location is not found, fill with 'Unknown' or a default value
+#     future_df['location'].fillna('Unknown', inplace=True)
+#
+#     # Preprocess and add features (lag, rolling mean, etc.)
+#     combined_df = pd.concat([df, future_df], ignore_index=True)
+#     combined_df = lag_features(combined_df, [91, 98, 105, 112, 119, 126, 182, 364, 546, 728])
+#     combined_df = roll_mean_features(combined_df, [365, 546, 730])
+#     combined_df = ewm_features(combined_df, [0.99, 0.95, 0.9, 0.8, 0.7, 0.5], [91, 98, 105, 112, 180, 270, 365, 546, 728])
+#     combined_df['day_of_week'] = combined_df['date'].dt.dayofweek
+#     combined_df['month'] = combined_df['date'].dt.month
+#     combined_df = pd.get_dummies(combined_df, columns=['day_of_week', 'month'])
+#
+#     # Align columns with model features
+#     train_columns = model.feature_name()
+#     missing_cols = set(train_columns) - set(combined_df.columns)
+#     for col in missing_cols:
+#         combined_df[col] = 0
+#     combined_df = combined_df[train_columns]
+#
+#     # Make predictions
+#     future_predictions = combined_df[len(df):]
+#     future_df['unitSold'] = np.expm1(model.predict(future_predictions))
+#
+#     # Aggregate predictions by store, product, and month, including product_name
+#     future_df['month'] = future_df['date'].dt.strftime('%B')
+#     future_df.to_json("inital_csv", orient="records", indent=4)
+#
+#     # Aggregate predictions by store, product, and month
+#     aggregated_df = future_df.groupby(['store', 'item', 'product_name', 'month', 'location'], as_index=False).agg(
+#         total_unitSold=('unitSold', 'sum')
+#     )
+#     aggregated_df.to_json("inital_csv.json", orient="records", indent=4)
+#     cnt=0
+#     # Apply constraints to aggregated predictions
+#     def apply_constraints(row, cnt=0):
+#         original_unit_sold = df[df['item'] == row['item']]['unitSold'].sum()
+#         cnt=cnt+1
+#         print(original_unit_sold,cnt)
+#         if pd.notna(original_unit_sold):
+#             lower_bound = max(0, original_unit_sold * 0.90)  # 90% lower limit
+#             upper_bound = original_unit_sold * 1.02  # 102% upper limit
+#             return max(lower_bound, min(row['total_unitSold'], upper_bound))
+#         return row['total_unitSold']
+#
+#     aggregated_df['constrained_unitSold'] = aggregated_df.apply(apply_constraints, axis=1)
+#
+#     # Prepare data for process_sales_data
+#     final_df = aggregated_df[['store', 'item', 'product_name', 'month', 'constrained_unitSold', 'location']].rename(
+#         columns={'constrained_unitSold': 'unitSold'}
+#     )
+#
+#     # Save the aggregated and constrained predictions
+#     final_output_file = "aggregated_predictions.json"
+#     final_df.to_json(final_output_file, orient="records", indent=4)
+#     print(f"Aggregated predictions saved to {final_output_file}")
+#
+#     # Process sales data
+#     final_result = process_sales_data(final_output_file, "final_predictions.json")
+#     print("Final predictions processed successfully.")
+#     return final_result
+
 def predict_sales(csv_file, model_path, output_file="predictions_stock.json"):
-    """Predict sales for the next month and process the data after predictions."""
+    """
+    Predict sales for the next month, aggregate predictions by store and product, apply constraints,
+    and process the data.
+    """
     # Load the trained model
     with open(model_path, "rb") as file:
         model = pickle.load(file)
 
     # Read the uploaded CSV file into a DataFrame
     df = pd.read_csv(csv_file)
-    # yyyy-mm-dd
-    # Parse the date column with dayfirst=True to handle DD-MM-YYYY format
-    df['date'] = pd.to_datetime(df['date'], dayfirst=True)
-# p001
-# for loop i=0 i+1
-    # Convert 'item' column to integer using a mapping
+
+    # Clean the date column (strip spaces and remove non-ASCII characters)
+    df['date'] = df['date'].str.strip()  # Removes leading/trailing spaces
+    df['date'] = df['date'].apply(lambda x: x.encode('ascii', 'ignore').decode('ascii'))  # Removes non-ASCII characters
+
+    # Parse the date column (YYYY-MM-DD format)
+    df['date'] = pd.to_datetime(df['date'], errors='coerce')
+
+    # Identify invalid dates (NaT)
+    invalid_dates = df[df['date'].isna()]
+    if not invalid_dates.empty:
+        print("Invalid dates found in the input file:")
+        print(invalid_dates)
+        # Handle invalid dates - one approach is to fill them with the previous valid date or current date
+        # Option 1: Replace NaT with the previous valid date (if it exists)
+        df['date'] = df['date'].fillna(method='ffill')  # Forward fill
+        print("Invalid dates corrected.")
+
+    # Map product IDs to integers dynamically
     item_mapping = {item: idx + 1 for idx, item in enumerate(df['item'].unique())}
     df['item'] = df['item'].map(item_mapping)
 
+    # Create a store-location mapping (ensure each store has a unique location)
+    store_location_mapping = df[['store', 'location']].drop_duplicates().set_index('store')['location'].to_dict()
+
     # Dynamically determine the last date in the dataset
-    last_date = df['date'].max() # 31-12-2018
+    last_date = df['date'].max()
 
-    # Calculate the first date of the next month
+    # Generate the future dates for prediction
     next_month_start = (last_date + MonthBegin(1))
-
-    # Generate all dates for the next month
     next_month_days = pd.date_range(next_month_start, periods=31, freq='D')
 
     # Dynamically extract unique stores and items
-    stores = df['store'].unique()  # Get unique store IDs
-    items = df['item'].unique()  # Get unique item IDs
+    stores = df['store'].unique()
+    items = df['item'].unique()
 
     # Create all combinations of future dates, stores, and items
     future_df = pd.DataFrame(
@@ -102,77 +250,65 @@ def predict_sales(csv_file, model_path, output_file="predictions_stock.json"):
         columns=['date', 'store', 'item']
     )
 
-    # Merge product details (like product_name) dynamically if available
+    # Merge product details dynamically
     if 'product_name' in df.columns:
         future_df = future_df.merge(df[['item', 'product_name']].drop_duplicates(), on='item', how='left')
 
-    # Concatenate the original and future data for preprocessing
+    # Map the 'location' for each store in future_df
+    future_df['location'] = future_df['store'].map(store_location_mapping)
+
+    # If a store's location is not found, fill with 'Unknown' or a default value
+    future_df['location'].fillna('Unknown', inplace=True)
+
+    # Preprocess and add features (lag, rolling mean, etc.)
     combined_df = pd.concat([df, future_df], ignore_index=True)
-    # normalize to 0-1 100 -- 0.9
-    # Add lag features
     combined_df = lag_features(combined_df, [91, 98, 105, 112, 119, 126, 182, 364, 546, 728])
-
-    # Add rolling mean features
     combined_df = roll_mean_features(combined_df, [365, 546, 730])
-
-    # Add exponential weighted mean features
     combined_df = ewm_features(combined_df, [0.99, 0.95, 0.9, 0.8, 0.7, 0.5], [91, 98, 105, 112, 180, 270, 365, 546, 728])
-
-    # Extract day_of_week and month features
     combined_df['day_of_week'] = combined_df['date'].dt.dayofweek
     combined_df['month'] = combined_df['date'].dt.month
     combined_df = pd.get_dummies(combined_df, columns=['day_of_week', 'month'])
 
-    # Align combined_df with the model's expected features
-    train_columns = model.feature_name()  # Extract feature names from the model
-    missing_cols = set(train_columns) - set(combined_df.columns)  # Find missing columns
+    # Align columns with model features
+    train_columns = model.feature_name()
+    missing_cols = set(train_columns) - set(combined_df.columns)
     for col in missing_cols:
-        combined_df[col] = 0  # Add missing columns with default value 0
+        combined_df[col] = 0
+    combined_df = combined_df[train_columns]
 
-    combined_df = combined_df[train_columns]  # Reorder columns to match the model
+    # Make predictions
+    future_predictions = combined_df[len(df):]
+    future_df['unitSold'] = np.expm1(model.predict(future_predictions))
 
-    # Make predictions for the future dataset
-    future_predictions = combined_df[len(df):]  # Slice to get only the future rows
-    future_df['unitSold'] = np.expm1(model.predict(future_predictions))  # Reverse log transformation
+    # Aggregate predictions by store, product, and month, including product_name
+    future_df['month'] = future_df['date'].dt.strftime('%B')
+    future_df.to_json("inital_csv", orient="records", indent=4)
 
-    # Prepare the final result with all required fields
-    future_df['id'] = range(1, len(future_df) + 1)  # Add an 'id' column for unique identification
-    result = future_df[['id', 'date', 'store', 'item', 'product_name', 'unitSold']]  # Prepare the result
+    # Aggregate predictions by store, product, and month
+    aggregated_df = future_df.groupby(['store', 'item', 'product_name', 'month', 'location'], as_index=False).agg(
+        total_unitSold=('unitSold', 'sum')
+    )
+    aggregated_df.to_json("inital_csv.json", orient="records", indent=4)
 
-    # Convert the 'date' column to string format (YYYY-MM-DD)
-    result['date'] = result['date'].dt.strftime('%Y-%m-%d')
+    # Prepare data for process_sales_data
+    final_df = aggregated_df[['store', 'item', 'product_name', 'month', 'total_unitSold', 'location']].rename(
+        columns={'total_unitSold': 'unitSold'}
+    )
 
-    # Save the result as a JSON file
-    result.to_json(output_file, orient="records", indent=4)
-    print(f"Predictions saved to {output_file}")
+    # Save the aggregated predictions
+    final_output_file = "aggregated_predictions.json"
+    final_df.to_json(final_output_file, orient="records", indent=4)
+    print(f"Aggregated predictions saved to {final_output_file}")
 
-    # Call process_sales_data to aggregate the predictions
-    final_result = process_sales_data(output_file, "final_predictions.json")
-    print()
-    # Now apply constraints on the predictions
-    def constrain_prediction(row, df):
-        # Sum up all 'unitSold' values for the same 'item', ignoring 'store'
-        original_unit_sold = df.loc[(df['item'] == row['productId']), 'unitSold'].sum()
-        print(original_unit_sold)
-        if pd.notna(original_unit_sold):  # Ensure original value exists
-            # Calculate the lower and upper bounds based on ±6% of the summed unitSold
-            lower_bound = max(0, original_unit_sold * 0.90)  # 6% lower limit
-            upper_bound = original_unit_sold * 1.02  # 6% upper limit
-            print(lower_bound,upper_bound)
-            # Clamp the prediction value within the bounds
-            return max(lower_bound, min(row['total_predicted_unit'], upper_bound))
+    # Process sales data
+    final_result = process_sales_data(final_output_file, "final_predictions.json")
+    print("Final predictions processed successfully.")
 
-        return row['total_predicted_unit']  # Leave as is if no original unitSold found
-# 2785 1650
-    # Apply constraints to each prediction in the final_result
-    final_result = [dict(row, unitSold=constrain_prediction(row, df)) for row in final_result]
+    # Return both final_prediction and aggregated_prediction as a JSON object
+    final_prediction = final_result  # Assuming the final_result is the desired final prediction
+    aggregated_prediction = aggregated_df.to_dict(orient='records')
 
-    # Save the final result after applying constraints
-    final_output_file = "final_predictions_with_constraints.json"
-    with open(final_output_file, 'w') as f:
-        json.dump(final_result, f, indent=4)
-
-    print(f"Final predictions with constraints saved to {final_output_file}")
-
-    # Return the final processed predictions
-    return final_result
+    return {
+        'product': final_prediction,
+        'store_aggregated_prediction': aggregated_prediction
+    }

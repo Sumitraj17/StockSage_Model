@@ -18,4 +18,4 @@ if __name__ == "__main__":
     # Run the FastAPI application
     uvicorn.run(app, host="0.0.0.0", port=8000)
 
-# json_result = predict_sales("New_Sales_Data_November.csv","stocksage_model.pkl")
+# json_result = predict_sales("sales.csv","stocksage_model.pkl")
